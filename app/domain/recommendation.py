@@ -12,14 +12,17 @@ from app.domain.provenance import ProvenanceRecord
 
 
 class KnowledgeMatch(BaseModel):
-    """A single semantic-search hit against a knowledge collection."""
+    """A single retrieval hit against a knowledge collection."""
 
     collection: KnowledgeCollection
     record_id: str
     title: str
     snippet: str
     score: float = Field(ge=0.0, le=1.0)
-    """Similarity score normalized to [0, 1], 1.0 = exact match."""
+    """Retrieval score in [0, 1]; interpretation depends on the backend.
+    FTS uses query term coverage, optionally adjusted for applicability.
+    This is not a calibrated probability of a correct diagnosis.
+    """
     metadata: dict = Field(default_factory=dict)
     reason: str = ""
     """Deterministic, human-readable "why was this recommended" --

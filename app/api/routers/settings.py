@@ -17,6 +17,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 class SettingsView(BaseModel):
+    knowledge_backend: str
     app_name: str
     log_level: str
     embedding_model_name: str
@@ -28,6 +29,7 @@ class SettingsView(BaseModel):
 @router.get("", response_model=SettingsView)
 def get_settings_view(settings: Settings = Depends(get_settings_dep)) -> SettingsView:
     return SettingsView(
+        knowledge_backend=settings.knowledge_backend,
         app_name=settings.app_name,
         log_level=settings.log_level,
         embedding_model_name=settings.embedding_model_name,

@@ -1,5 +1,28 @@
 # ResolveIQ
 
+## Fast shared-service edition
+
+The default search backend is now **SQLite FTS5 + BM25**, stored in the
+existing application database. It requires no vector database, embedding
+model download, or Torch installation. Chroma semantic search is optional.
+Knowledge edits, publishing, and archiving update the search index immediately.
+
+Host the API and Streamlit UI once; onshore and WFH teammates open one URL
+through the company network/VPN. They do not install anything or copy a database.
+See [shared deployment and migration](docs/SHARED_SERVICE.md).
+
+Live TFS/Wiki lookups share a configurable three-second response budget. Slow
+lookups may finish in the background and populate the cache for a retry.
+Concurrency is bounded to one active lookup per source; no unbounded queue.
+This bounds connector waiting, not parsing or the entire analysis request.
+
+Full-text search matches words/identifiers rather than semantic paraphrases.
+Its score measures query term coverage; existing applicability rules still
+adjust relevance. Scores are not a calibrated probability of a correct fix.
+
+The Sprint 1 notes below describe the original prototype and are historical;
+document ingestion, knowledge administration, and connectors now exist.
+
 **Investigation Intelligence Platform for L2/L3 Product Support Engineers.**
 
 ResolveIQ is not a chatbot -- it's a system that reasons over Evidence

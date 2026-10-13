@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.dependencies import get_knowledge_engine, run_knowledge_foundation_migration
+from app.api.dependencies import close_runtime_resources, get_knowledge_engine, run_knowledge_foundation_migration
 from app.api.routers import (
     dashboard,
     health,
@@ -49,8 +49,11 @@ async def lifespan(app: FastAPI):
         knowledge_engine = get_knowledge_engine()
         knowledge_engine.seed_from_directory(settings.sample_knowledge_dir)
 
-    yield
-    logger.info("Shutting down %s", settings.app_name)
+    try:
+        yield
+    finally:
+        close_runtime_resources()
+        logger.info("Shutting down %s", settings.app_name)
 
 
 app = FastAPI(

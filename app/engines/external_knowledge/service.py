@@ -13,8 +13,10 @@ results or vice versa, and neither may block the rest of
 from __future__ import annotations
 
 import logging
+import json
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, wait
+from threading import BoundedSemaphore
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -191,8 +193,9 @@ def _first_evidence_text(investigation: "InvestigationSession", *, max_chars: in
     return ""
 
 
-def _cache_key(source: ExternalSource, terms: SearchTerms) -> str:
-    return f"{source.value}:{','.join(sorted(t.lower() for t in terms.all))}"
+def _cache_key(source: ExternalSource, terms: SearchTerms, *context) -> str:
+    # Ranked results depend on investigation context, not just search terms.
+    return json.dumps([source.value, terms.anchor, terms.supporting, context], sort_keys=True)
 
 
 def _entity_values(entities: list["ExtractedEntity"]) -> list[str]:
@@ -264,6 +267,8 @@ class ExternalKnowledgeService:
         self._tfs = tfs_connector
         self._wiki = wiki_connector
         self._settings = settings
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="resolveiq-connectors")
+        self._slots = {source: BoundedSemaphore(1) for source in (ExternalSource.TFS, ExternalSource.WIKI)}
         self._cache: TtlCache[ExternalKnowledgeResult] = TtlCache(
             max_entries=50, ttl_seconds=settings.external_knowledge_cache_ttl_seconds
         )
@@ -288,35 +293,54 @@ class ExternalKnowledgeService:
         title = investigation.title
         customer = investigation.customer
         max_results = self._settings.external_knowledge_max_results
-        timeout = self._settings.external_knowledge_timeout_seconds
+        results = {}
+        pending = {}
+        args = (terms, title, component_name, technology, entity_values, customer, max_results)
+        for source, connector, runner in (
+            (ExternalSource.TFS, self._tfs, self._run_tfs),
+            (ExternalSource.WIKI, self._wiki, self._run_wiki),
+        ):
+            cached = self._cache.get(_cache_key(source, terms, title, component_name, technology, entity_values, customer, max_results))
+            if cached is not None:
+                results[source] = cached.model_copy(update={"from_cache": True})
+            elif not connector.is_configured():
+                results[source] = ExternalKnowledgeResult(source=source, available=False, error=f"{source.value.upper()} is not configured.")
+            elif self._slots[source].acquire(blocking=False):
+                try:
+                    future = self._executor.submit(runner, *args)
+                except Exception:
+                    self._slots[source].release()
+                    raise
+                future.add_done_callback(lambda _, slot=self._slots[source]: slot.release())
+                pending[source] = future
+            else:
+                results[source] = ExternalKnowledgeResult(source=source, available=False,
+                    error=f"{source.value.upper()} lookup is busy. Local knowledge was used; retry shortly.")
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            tfs_future = executor.submit(
-                self._run_tfs, terms, title, component_name, technology, entity_values, customer, max_results
-            )
-            wiki_future = executor.submit(
-                self._run_wiki, terms, title, component_name, technology, entity_values, customer, max_results
-            )
-            # Each future's own connector call already carries the
-            # configured request timeout internally (see the REST
-            # clients) -- this wrapper timeout is a safety margin, not
-            # the primary bound, in case something hangs outside the
-            # HTTP call itself (e.g. auth negotiation).
-            tfs_result = self._safe_result(tfs_future, ExternalSource.TFS, timeout)
-            wiki_result = self._safe_result(wiki_future, ExternalSource.WIKI, timeout)
+        # One deadline for both sources. A timed-out request must not wait for
+        # executor shutdown; completed calls fill the cache for a later retry.
+        if pending:
+            wait(pending.values(), timeout=self._settings.external_knowledge_response_budget_seconds)
+        for source, future in pending.items():
+            results[source] = self._safe_result(future, source, 0)
+        return results[ExternalSource.TFS], results[ExternalSource.WIKI]
 
-        return tfs_result, wiki_result
+    def close(self) -> None:
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
     @staticmethod
     def _safe_result(future, source: ExternalSource, timeout: float) -> ExternalKnowledgeResult:
         try:
-            return future.result(timeout=timeout + 2)
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            return ExternalKnowledgeResult(source=source, available=False,
+                error=f"{source.value.upper()} exceeded the response budget. Local knowledge was used; retry shortly.")
         except Exception as exc:  # noqa: BLE001 -- external knowledge must never break Analyze
             logger.warning("External knowledge (%s) failed: %s", source.value, exc.__class__.__name__)
             return ExternalKnowledgeResult(source=source, available=False, error=f"{source.value.upper()} lookup failed unexpectedly.")
 
     def _run_tfs(self, terms: SearchTerms, title, component_name, technology, entity_values, customer, max_results) -> ExternalKnowledgeResult:
-        cache_key = _cache_key(ExternalSource.TFS, terms)
+        cache_key = _cache_key(ExternalSource.TFS, terms, title, component_name, technology, entity_values, customer, max_results)
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached.model_copy(update={"from_cache": True})
@@ -361,7 +385,7 @@ class ExternalKnowledgeService:
         return result
 
     def _run_wiki(self, terms: SearchTerms, title, component_name, technology, entity_values, customer, max_results) -> ExternalKnowledgeResult:
-        cache_key = _cache_key(ExternalSource.WIKI, terms)
+        cache_key = _cache_key(ExternalSource.WIKI, terms, title, component_name, technology, entity_values, customer, max_results)
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached.model_copy(update={"from_cache": True})

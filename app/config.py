@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,6 +35,8 @@ class Settings(BaseSettings):
     never reads this back."""
 
     # --- Knowledge / embeddings -------------------------------------------
+    knowledge_backend: Literal["sqlite_fts", "chroma"] = "sqlite_fts"
+    external_knowledge_response_budget_seconds: float = Field(default=3.0, gt=0, le=60)
     embedding_model_name: str = "all-MiniLM-L6-v2"
     sample_knowledge_dir: Path = BASE_DIR / "data" / "sample_knowledge"
     auto_seed_knowledge: bool = True

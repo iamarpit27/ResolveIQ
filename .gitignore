@@ -4,9 +4,12 @@ __pycache__/
 venv/
 .env
 data/resolveiq.db
+data/resolveiq.db-wal
+data/resolveiq.db-shm
 data/chroma/
 data/uploads/
 *.egg-info/
 .pytest_cache/
+pytest-cache-files-*/
 .mypy_cache/
 .ruff_cache/

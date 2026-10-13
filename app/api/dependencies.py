@@ -23,6 +23,7 @@ from app.engines.knowledge.classification import DocumentClassificationEngine
 from app.engines.knowledge.embedding_provider import EmbeddingProvider, SentenceTransformerEmbeddingProvider
 from app.engines.knowledge.engine import KnowledgeEngine
 from app.engines.knowledge.knowledge_store import ChromaKnowledgeStore, KnowledgeStore
+from app.engines.knowledge.sqlite_store import SqliteKnowledgeStore
 from app.engines.knowledge_management.engine import KnowledgeManagementEngine
 from app.engines.knowledge_object_framework.adapters import KnowledgeObjectAdapter, build_adapters
 from app.engines.knowledge_object_framework.service import KnowledgeObjectService
@@ -65,6 +66,8 @@ def _embedding_provider() -> EmbeddingProvider:
 @lru_cache
 def _knowledge_store() -> KnowledgeStore:
     settings = get_settings()
+    if settings.knowledge_backend == "sqlite_fts":
+        return SqliteKnowledgeStore(settings.sqlite_path)
     return ChromaKnowledgeStore(settings.chroma_persist_dir, _embedding_provider())
 
 
@@ -380,6 +383,7 @@ def reset_singletons() -> None:
     """Test/dev helper: clears every cached singleton so the next
     dependency call rebuilds from current settings. Not used by the app
     itself in normal operation."""
+    close_runtime_resources()
     for fn in (
         _embedding_provider,
         _knowledge_store,
@@ -412,3 +416,9 @@ def reset_singletons() -> None:
         _document_classification_engine,
     ):
         fn.cache_clear()
+
+
+def close_runtime_resources() -> None:
+    if _external_knowledge_service.cache_info().currsize:
+        _external_knowledge_service().close()
+        _external_knowledge_service.cache_clear()

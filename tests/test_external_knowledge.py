@@ -8,6 +8,8 @@ test here ever makes a real network call.
 from __future__ import annotations
 
 from datetime import datetime
+from threading import Event
+from time import monotonic
 
 import pytest
 
@@ -22,6 +24,37 @@ from app.engines.external_knowledge.ranking import confidence_for_score, score_c
 from app.engines.external_knowledge.service import ExternalKnowledgeService, build_search_terms
 from app.engines.external_knowledge.tfs_rest_client import TfsConnectorError, _build_wiql
 from app.engines.external_knowledge.wiki_rest_client import WikiConnectorError, _build_cql
+
+
+def test_slow_connector_has_one_deadline_and_no_unbounded_queue():
+    release = Event()
+    started = Event()
+    calls = []
+
+    class SlowTfs(FakeTfsConnector):
+        def search_work_items(self, **kwargs):
+            calls.append(1)
+            started.set()
+            release.wait(5)
+            return []
+
+    service = ExternalKnowledgeService(tfs_connector=SlowTfs(cases=[]),
+        wiki_connector=FakeWikiConnector(pages=[]),
+        settings=Settings(external_knowledge_response_budget_seconds=0.05))
+    try:
+        begin = monotonic()
+        tfs, wiki = service.gather(_investigation(), [], None, None)
+        assert started.is_set()
+        assert monotonic() - begin < 0.75
+        assert not tfs.available and "budget" in tfs.error
+        assert wiki.available
+        for _ in range(4):
+            result, _ = service.gather(_investigation(), [], None, None)
+            assert "busy" in result.error
+        assert len(calls) == 1
+    finally:
+        release.set()
+        service.close()
 
 # --- extraction.py -----------------------------------------------------
 

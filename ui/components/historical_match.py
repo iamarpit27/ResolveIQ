@@ -42,7 +42,7 @@ def render_historical_match(match: dict, *, key: str) -> None:
     untruncated."""
     ticket = ticket_number_from_tags(match.get("metadata", {}).get("tags"))
     ticket_suffix = f" · 🎫 `{ticket}`" if ticket else ""
-    st.markdown(f"**{truncate_words(match['title'])}** _({match['score']:.0%} similarity)_{ticket_suffix}")
+    st.markdown(f"**{truncate_words(match['title'])}** _({match['score']:.0%} relevance)_{ticket_suffix}")
     if match.get("snippet"):
         st.caption(match["snippet"])
 

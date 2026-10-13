@@ -464,6 +464,11 @@ class RecommendationEngine:
         annotated: list[KnowledgeMatch] = []
         for match in matches:
             applicability_reasons = match.metadata.get("applicability_reasons")
+            if match.metadata.get("search_backend") == "sqlite_fts":
+                parts = [match.reason or f"Keyword relevance score {match.score:.0%}"]
+                parts.extend(applicability_reasons or [])
+                annotated.append(match.model_copy(update={"reason": "; ".join(parts)}))
+                continue
             if applicability_reasons:
                 reason = "; ".join(applicability_reasons) + f" (also semantically similar, {match.score:.0%})"
             else:
@@ -496,7 +501,7 @@ class RecommendationEngine:
                     description=_snippet(root_cause),
                     confidence=match.score,
                     rationale=f"Matches historical investigation '{match.title}' "
-                    f"({match.score:.0%} similarity).",
+                    f"({match.score:.0%} search relevance).",
                 )
             )
 
@@ -553,7 +558,7 @@ class RecommendationEngine:
 
         if similar_investigations and similar_investigations[0].score >= self._settings.min_similarity_for_root_cause:
             top = similar_investigations[0]
-            rationale = f"Based on historical investigation '{top.title}' ({top.score:.0%} similarity)."
+            rationale = f"Based on historical investigation '{top.title}' ({top.score:.0%} search relevance)."
             next_step = top.metadata.get("next_step")
             if next_step:
                 return _snippet(next_step), rationale

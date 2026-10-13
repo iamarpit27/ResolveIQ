@@ -1,0 +1,32 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      RESOLVEIQ_KNOWLEDGE_BACKEND: sqlite_fts
+      RESOLVEIQ_SQLITE_PATH: /app/data/resolveiq.db
+      RESOLVEIQ_KNOWLEDGE_UPLOAD_DIR: /app/data/uploads/knowledge
+      # Local knowledge is immediate; enable live sources when configured.
+      RESOLVEIQ_EXTERNAL_KNOWLEDGE_ENABLED: "false"
+    volumes:
+      - resolveiq-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+  ui:
+    build: .
+    restart: unless-stopped
+    command: ["streamlit", "run", "ui/Home.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+    environment:
+      RESOLVEIQ_API_URL: http://api:8000
+    ports:
+      # Put your authenticated company reverse proxy in front of this port.
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  resolveiq-data:
